@@ -3,36 +3,29 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import sendEmail from '../utils/sendEmail.js';
-import { messages, getLang } from '../utils/lang.js'; // Utility bahasa
-import eventBus from '../utils/eventEmitter.js';
+import { messages, getLang } from '../utils/lang.js';
 
 // ==========================================
 // FUNGSI BANTUAN: Pengiraan Automatik
 // ==========================================
 
-
-// PENGIRAAN YURAN BERDASARKAN IMEJ 2
+// PENGIRAAN YURAN BERDASARKAN GRED SSPA TERKINI
 const kiraYuran = (gred) => {
-    if (!gred) return 5.00;
-    const gredUpper = gred.toUpperCase();
-    
-    // i. Gred JUSA: RM 15.00
-    if (gredUpper.includes('JUSA') || gredUpper.includes('VU') || gredUpper.includes('VK')) {
-        return 15.00;
-    }
+    // Jika tiada gred dinyatakan, kita letak default ke RM15 (selain itu)
+    if (!gred) return 15.00;
     
     const match = gred.match(/\d+/);
     if (match) {
         const num = parseInt(match[0], 10);
-        // ii. Gred 41 hingga 54: RM 10.00
-        if (num >= 41 && num <= 54) return 10.00;
-        // iii. Gred 1 hingga 36: RM 5.00
-        if (num >= 1 && num <= 36) return 5.00;
+        if (num >= 1 && num <= 8) return 5.00;
+        if (num >= 9 && num <= 14) return 10.00;
     }
-    return 5.00; // Default
+    
+    // Selain itu (Contoh: Gred 15 ke atas, JUSA, VU, VK, dll)
+    return 15.00;
 };
 
-// PENENTUAN KAEDAH POTONGAN BERDASARKAN IMEJ 2
+// PENENTUAN KAEDAH POTONGAN LALAI
 const tentukanPotongan = (gred, pilihanPengguna) => {
     if (!gred) return pilihanPengguna || 'Tunai / Transfer';
     const gredUpper = gred.toUpperCase();
@@ -42,17 +35,18 @@ const tentukanPotongan = (gred, pilihanPengguna) => {
         return 'Potongan Gaji / Jabatan';
     }
     
-    // Gred Gunasama: Boleh pilih Tunai atau Potongan Gaji
     return pilihanPengguna || 'Tunai / Transfer';
 };
 
 // ==========================================
 // 1. Pendaftaran Akaun (Register)
 // ==========================================
+// Pendaftaran Akaun (Register) - Kemas Kini Kategori Ahli
+// ==========================================
 export const register = async (req, res) => {
     const { 
         no_kp, email, password, no_tel, negeri_bertugas, 
-        nama_waris, hubungan_waris, no_tel_waris, pilihan_potongan 
+        nama_waris, hubungan_waris, no_tel_waris 
     } = req.body;
 
     try {
@@ -62,50 +56,60 @@ export const register = async (req, res) => {
             return res.status(403).json({ message: "Maaf, No. IC ini tiada dalam rekod kakitangan Induk. Sila hubungi Urusetia." });
         }
 
-        // 2. Semak jika sudah berdaftar
+        // 2. Semak jika akaun login user sudah berdaftar
         const [existingUser] = await db.query('SELECT * FROM users WHERE email = ? OR no_kp = ?', [email, no_kp]);
         if (existingUser.length > 0) {
             return res.status(400).json({ message: "Akaun untuk No. IC atau E-mel ini telah wujud dalam sistem." });
         }
 
         const dataStaf = staf[0];
-        
-        // 3. Pengiraan Pintar (Yuran & Potongan berdasarkan Gred)
         const yuranBulanan = kiraYuran(dataStaf.gred_sspa);
-        const kaedahPotongan = tentukanPotongan(dataStaf.gred_sspa, pilihan_potongan);
 
-        // 4. Hash Kata Laluan
+        // 3. Hash Kata Laluan
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
 
-        // 5. Simpan ke dalam jadual `users` dengan status 'Menunggu'
-        const queryUser = `INSERT INTO users (no_kp, email, password, role, status_akaun) VALUES (?, ?, ?, 'Ahli', 'Menunggu')`;
+        // 4. Daftar akaun login sebagai AKTIF terus
+        const queryUser = `INSERT INTO users (no_kp, email, password, role, status_akaun) VALUES (?, ?, ?, 'Ahli', 'Aktif')`;
         await db.query(queryUser, [no_kp, email, hashedPassword]);
 
-        // 6. Simpan rekod kelab secara menyeluruh ke `keahlian_kelab`
-        const queryKeahlian = `
-            INSERT INTO keahlian_kelab 
-            (no_kp, nama_penuh, nama_majikan, negeri_bertugas, email, no_tel, nama_waris, hubungan_waris, no_tel_waris, yuran_bulanan, pilihan_potongan, status_ahli) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Menunggu Kelulusan')
-        `;
-        
-        // Nota: nama_majikan digunakan untuk menyimpan lokasi penempatan berdasarkan tetapan kelab anda
-        await db.query(queryKeahlian, [
-            no_kp, 
-            dataStaf.nama_pegawai, 
-            dataStaf.penempatan, 
-            negeri_bertugas, 
-            email, 
-            no_tel, 
-            nama_waris, 
-            hubungan_waris, 
-            no_tel_waris, 
-            yuranBulanan, 
-            kaedahPotongan
-        ]);
+        // 5. SEMAK REKOD KEAHLIAN (Membezakan Ahli Sedia Ada VS Ahli Baharu)
+        const [existingKeahlian] = await db.query('SELECT status_ahli FROM keahlian_kelab WHERE no_kp = ?', [no_kp]);
+
+        if (existingKeahlian.length > 0) {
+            console.log(`[REGISTER] Ahli Sedia Ada dikesan (IC: ${no_kp}). Menetapkan Potongan Biro Angkasa.`);
+            
+            // AHLI SEDIA ADA: Kemas kini butiran, kekalkan kaedah potongan Biro Angkasa (Potongan Gaji)
+            const queryUpdateKeahlian = `
+                UPDATE keahlian_kelab 
+                SET email = ?, no_tel = ?, negeri_bertugas = ?, 
+                    nama_waris = ?, hubungan_waris = ?, no_tel_waris = ?, 
+                    pilihan_potongan = 'Potongan Gaji / Jabatan', -- Tetapkan Biro Angkasa
+                    yuran_bulanan = ?
+                WHERE no_kp = ?
+            `;
+            await db.query(queryUpdateKeahlian, [
+                email, no_tel, negeri_bertugas, nama_waris, hubungan_waris, no_tel_waris, 
+                yuranBulanan, no_kp
+            ]);
+        } else {
+            console.log(`[REGISTER] Ahli Baharu dikesan (IC: ${no_kp}). Menetapkan Mandatori FPX.`);
+            
+            // AHLI BAHARU: Masukkan rekod baharu dengan tetapan mandatori Potongan FPX (ToyyibPay)
+            const queryInsertKeahlian = `
+                INSERT INTO keahlian_kelab 
+                (no_kp, nama_full, nama_majikan, negeri_bertugas, email, no_tel, nama_waris, hubungan_waris, no_tel_waris, yuran_bulanan, pilihan_potongan, status_ahli) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Potongan FPX (ToyyibPay)', 'TIDAK BERBAYAR')
+            `;
+            await db.query(queryInsertKeahlian, [
+                no_kp, dataStaf.nama_pegawai, dataStaf.penempatan, negeri_bertugas, 
+                email, no_tel, nama_waris, hubungan_waris, no_tel_waris, 
+                yuranBulanan
+            ]);
+        }
 
         res.status(201).json({ 
-            message: "Pendaftaran berjaya! Permohonan anda sedang diproses. Sila tunggu pengesahan daripada Admin sebelum log masuk." 
+            message: "Pendaftaran akaun berjaya! Sila log masuk untuk menyemak profil anda." 
         });
 
     } catch (error) {
@@ -134,13 +138,8 @@ export const login = async (req, res) => {
             return res.status(401).json({ message: "E-mel atau kata laluan salah." });
         }
 
-        // HALANG LOG MASUK JIKA STATUS 'Menunggu'
-        if (user.status_akaun === 'Menunggu') {
-            return res.status(403).json({ message: "Akaun anda sedang menunggu kelulusan daripada Admin." });
-        }
-        
         if (user.status_akaun === 'Ditolak') {
-            return res.status(403).json({ message: "Akaun anda telah ditolak oleh Admin." });
+            return res.status(403).json({ message: "Akaun anda telah disekat/ditolak oleh pentadbir." });
         }
 
         const token = jwt.sign(
@@ -181,7 +180,7 @@ export const forgotPassword = async (req, res) => {
 
         const resetToken = crypto.randomBytes(32).toString('hex');
         const hashedResetToken = crypto.createHash('sha256').update(resetToken).digest('hex');
-        const expiryTime = new Date(Date.now() + 10 * 60 * 1000); // Token sah selama 10 minit
+        const expiryTime = new Date(Date.now() + 10 * 60 * 1000); 
 
         await db.query(
             'UPDATE users SET reset_token = ?, reset_token_expiry = ? WHERE email = ?',
@@ -190,34 +189,27 @@ export const forgotPassword = async (req, res) => {
 
         const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
         
-        // Bina e-mel dinamik menggunakan templat
         const emailTemplate = `
         <div style="font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
-            
             <div style="background-color: #0F4C3A; padding: 30px 20px; text-align: center;">
                 <h1 style="margin: 0; font-size: 24px; color: #ffffff; letter-spacing: 1px;">KELAB SUKAN PERHILITAN</h1>
                 <p style="margin: 5px 0 0; font-size: 12px; color: #a7f3d0; text-transform: uppercase; letter-spacing: 1px;">Portal Akses Ahli</p>
             </div>
-            
             <div style="padding: 35px 40px; color: #374151; line-height: 1.6;">
                 <h2 style="font-size: 20px; color: #111827; margin-top: 0; margin-bottom: 20px;">${msg.emailTitle}</h2>
                 <p style="margin-bottom: 15px;">${msg.emailBody1}</p>
                 <p style="margin-bottom: 25px;">${msg.emailBody2}</p>
-                
                 <div style="text-align: center; margin: 35px 0;">
                     <a href="${resetUrl}" target="_blank" style="background-color: #E30613; color: #ffffff; padding: 14px 32px; text-decoration: none; border-radius: 6px; font-weight: 600; display: inline-block; font-size: 15px; transition: background-color 0.3s;">
                         ${msg.emailBtn}
                     </a>
                 </div>
-                
                 <p style="font-size: 14px; color: #6b7280; margin-bottom: 0;">${msg.emailIgnore}</p>
             </div>
-            
             <div style="background-color: #f9fafb; padding: 25px 30px; text-align: center; font-size: 11px; color: #6b7280; border-top: 1px solid #e5e7eb;">
                 <p style="margin: 0 0 10px;">&copy; ${new Date().getFullYear()} Kelab Sukan Perhilitan. Hak Cipta Terpelihara.</p>
                 <p style="margin: 0 0 10px;">E-mel ini dijana secara automatik. Sila jangan balas mesej ini.</p>
             </div>
-
         </div>
         `;
 

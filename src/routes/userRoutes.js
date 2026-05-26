@@ -4,7 +4,9 @@ import {
     updateMyProfile, 
     applyResignation, 
     changePassword,
-    updateGambarProfil
+    updateGambarProfil,
+    getSenaraiPTJ
+
 } from '../controllers/userController.js';
 import { mohonBantuan, sejarahBantuan } from '../controllers/kebajikanController.js';
 
@@ -32,6 +34,9 @@ router.post('/mohon-berhenti', applyResignation);
 
 // changePassword: Untuk keselamatan akaun
 router.put('/tukar-password', changePassword);
+
+// getSenaraiPTJ: Menarik senarai PTJ
+router.get('/senarai-ptj', getSenaraiPTJ);
 
 // 3. LALUAN KEBAJIKAN (MODUL BANTUAN)
 router.post('/bantuan', upload.single('dokumen'), mohonBantuan);

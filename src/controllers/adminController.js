@@ -118,60 +118,98 @@ export const senaraiMenungguSahkan = async (req, res) => {
 };
 
 // Fungsi Bantuan untuk Kod Negeri
+// Fungsi bantuan untuk menukar nama negeri kepada Kod 3 Huruf
 const getKodNegeri = (negeri) => {
+    if (!negeri) return 'MAL'; // Default jika tiada negeri
+    
     const kod = {
-        'JOHOR': 'JHR', 'KEDAH': 'KDH', 'KELANTAN': 'KEL', 'MELAKA': 'MLK',
-        'NEGERI SEMBILAN': 'NSN', 'PAHANG': 'PAH', 'PERAK': 'PRK', 'PERLIS': 'PLS',
-        'PULAU PINANG': 'PNG', 'SABAH': 'SBH', 'SARAWAK': 'SRW', 'SELANGOR': 'SEL',
-        'TERENGGANU': 'TRG', 'WP KUALA LUMPUR': 'WPKL', 'WP LABUAN': 'WPLB', 'WP PUTRAJAYA': 'WPPJ'
+        'Johor': 'JHR', 'Kedah': 'KDH', 'Kelantan': 'KTN', 'Melaka': 'MLK',
+        'Negeri Sembilan': 'NSN', 'Pahang': 'PHG', 'Perak': 'PRK', 'Perlis': 'PLS',
+        'Pulau Pinang': 'PNG', 'Selangor': 'SGR', 'Terengganu': 'TRG',
+        'WP Kuala Lumpur': 'KUL', 'WP Labuan': 'LBN', 'WP Putrajaya': 'PJY'
     };
-    return kod[negeri.toUpperCase()] || 'UMUM';
+    return kod[negeri] || 'MAL';
 };
 
-// Lulus atau Tolak pendaftaran & Generate No Ahli
-// src/controllers/adminController.js
 export const sahkanAkaun = async (req, res) => {
     const { no_kp } = req.params;
-    const { status_keputusan } = req.body; // Terima 'Aktif' atau 'Ditolak'
+    
+    // Kita tangkap kedua-dua kemungkinan nama pembolehubah dari Frontend
+    const status_keputusan = req.body.status_keputusan || req.body.status_ahli;
 
     try {
-        if (status_keputusan === 'Aktif') {
-            // Tarik maklumat negeri untuk penjanaan ID
-            const [ahli] = await db.query('SELECT negeri_bertugas FROM keahlian_kelab WHERE no_kp = ?', [no_kp]);
-            const kodNegeri = getKodNegeri(ahli[0].negeri_bertugas); // Fungsi bantuan kod negeri
-            const tahun = new Date().getFullYear();
+        // Terima sama ada 'Aktif' atau 'A - Aktif'
+        if (status_keputusan === 'Aktif' || status_keputusan === 'A - Aktif') {
+            
+            // 1. Tarik maklumat tarikh mula potongan / daftar untuk tentukan tahun
+            const [ahli] = await db.query('SELECT mula_potongan, created_at FROM keahlian_kelab WHERE no_kp = ?', [no_kp]);
+            
+            // Semakan keselamatan jika no_kp tidak wujud
+            if (ahli.length === 0) {
+                return res.status(404).json({ success: false, message: "Rekod keahlian tidak dijumpai." });
+            }
 
-            // Cari urutan terakhir bagi negeri & tahun tersebut
-            const pattern = `Kelab-${kodNegeri}-%/${tahun}`;
+            // Dapatkan tahun dari mula_potongan, jika tiada guna tahun daftar (created_at) atau tahun semasa
+            let tahun = new Date().getFullYear();
+            if (ahli[0].mula_potongan) {
+                const tarikhMula = new Date(ahli[0].mula_potongan);
+                if (!isNaN(tarikhMula)) tahun = tarikhMula.getFullYear();
+            } else if (ahli[0].created_at) {
+                const tarikhDaftar = new Date(ahli[0].created_at);
+                if (!isNaN(tarikhDaftar)) tahun = tarikhDaftar.getFullYear();
+            }
+
+            // 2. Cari urutan terakhir bagi format KP-XXXX-TAHUN
+            const pattern = `KP-%-${tahun}`;
             const [lastRecord] = await db.query(
                 'SELECT no_ahli FROM keahlian_kelab WHERE no_ahli LIKE ? ORDER BY no_ahli DESC LIMIT 1', 
                 [pattern]
             );
 
             let nextNum = 1;
+            
+            // 3. Logik pecahan ID untuk format baharu: KP-0001-2026
             if (lastRecord.length > 0 && lastRecord[0].no_ahli) {
-                const parts = lastRecord[0].no_ahli.split('-');
-                const numPart = parts[2].split('/')[0];
-                nextNum = parseInt(numPart) + 1;
+                try {
+                    const parts = lastRecord[0].no_ahli.split('-'); 
+                    // parts[0] = 'KP', parts[1] = '0001', parts[2] = '2026'
+                    if (parts.length >= 3) {
+                        nextNum = parseInt(parts[1], 10) + 1;
+                    }
+                } catch (err) {
+                    // Fallback jika format lama di pangkalan data rosak
+                    nextNum = 1; 
+                }
             }
 
-            // Format ID: Kelab-SEL-001/2026
-            const noAhli = `Kelab-${kodNegeri}-${nextNum.toString().padStart(3, '0')}/${tahun}`;
+            // 4. Format ID Baharu: KP-0001-2026 (Running number 4 digit)
+            const noAhliBaru = `KP-${nextNum.toString().padStart(4, '0')}-${tahun}`;
 
-            // Kemas kini status kepada Aktif dan simpan No Ahli
+            // 5. Kemas kini status kepada Aktif dan simpan No Ahli
             await db.query(
                 'UPDATE keahlian_kelab SET status_ahli = "A - Aktif", no_ahli = ? WHERE no_kp = ?',
-                [noAhli, no_kp]
+                [noAhliBaru, no_kp]
             );
             await db.query('UPDATE users SET status_akaun = "Aktif" WHERE no_kp = ?', [no_kp]);
+            
+            return res.status(200).json({ 
+                success: true, 
+                message: "Tindakan pengesahan selesai. Akaun aktif.",
+                no_ahli: noAhliBaru 
+            });
+
         } else {
+            // JIKA DITOLAK
             await db.query('UPDATE keahlian_kelab SET status_ahli = "Ditolak" WHERE no_kp = ?', [no_kp]);
             await db.query('UPDATE users SET status_akaun = "Ditolak" WHERE no_kp = ?', [no_kp]);
+            
+            return res.status(200).json({ success: true, message: "Permohonan telah ditolak." });
         }
 
-        res.json({ success: true, message: "Tindakan pengesahan selesai." });
     } catch (error) {
-        res.status(500).json({ message: "Ralat pengesahan." });
+        // Tulis ralat sebenar di Terminal Mac anda (Sangat penting untuk debugging)
+        console.error("🔴 RALAT SAHKAN AKAUN:", error);
+        res.status(500).json({ success: false, message: "Ralat pada pelayan pangkalan data." });
     }
 };
 
@@ -434,5 +472,37 @@ export const getStatistikTunggakan = async (req, res) => {
     } catch (error) {
         console.error("Ralat Statistik Keahlian:", error);
         res.status(500).json({ success: false, message: "Gagal memuatkan statistik keahlian." });
+    }
+};
+
+// ==========================================
+// DAPATKAN SEMUA REKOD RESIT (ADMIN VIEW)
+// ==========================================
+export const getAllResitBayaran = async (req, res) => {
+    try {
+        const query = `
+            SELECT 
+                sb.id, 
+                sb.billCode, 
+                sb.amaun, 
+                sb.status, 
+                sb.keterangan, 
+                DATE_FORMAT(sb.tarikh_cipta, '%d-%m-%Y %h:%i %p') AS tarikh,
+                sb.tarikh_cipta,
+                k.nama_penuh, 
+                k.no_kp, 
+                k.email, 
+                k.no_tel,
+                k.no_ahli
+            FROM sejarah_bayaran sb
+            LEFT JOIN keahlian_kelab k ON sb.no_kp = k.no_kp
+            ORDER BY sb.tarikh_cipta DESC
+        `;
+        const [rows] = await db.query(query);
+        
+        res.status(200).json({ success: true, data: rows });
+    } catch (error) {
+        console.error("🔴 [ADMIN API ERROR] Gagal tarik rekod resit:", error.message);
+        res.status(500).json({ success: false, message: "Gagal menarik senarai resit." });
     }
 };

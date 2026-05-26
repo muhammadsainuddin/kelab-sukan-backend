@@ -14,7 +14,8 @@ import {
     getProfilSaya,
     kemaskiniProfilSaya,
     tukarKatalaluan,  // <--- FUNGSI BARU
-    getStatistikTunggakan
+    getStatistikTunggakan,
+    getAllResitBayaran
 } from '../controllers/adminController.js';
 import { verifyToken, requireRole } from '../middleware/authMiddleware.js';
 
@@ -45,6 +46,11 @@ router.put('/pengesahan/:no_kp', sahkanAkaun);
 // ------------------------------------------
 router.get('/semua-staff', senaraiSemuaStaff);
 router.post('/tambah-staff-pukal', tambahStaffBulk);
+
+// ------------------------------------------
+// PENGURUSAN RESIT PEMBAYARAN
+// ------------------------------------------
+router.get('/sejarah-bayaran', getAllResitBayaran);
 
 // ------------------------------------------
 // PENGURUSAN KEBAJIKAN & BERHENTI

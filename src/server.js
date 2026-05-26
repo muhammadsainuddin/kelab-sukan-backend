@@ -6,12 +6,14 @@ import jwt from 'jsonwebtoken';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+
 import db from './config/db.js'; // Import pangkalan data untuk cek kesihatan
 import authRoutes from './routes/authRoutes.js';
 import memberRoutes from './routes/memberRoutes.js';
 import pertandinganRoutes from './routes/pertandinganRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import userRoutes from './routes/userRoutes.js';
+import bayaranRoutes from './routes/bayaranRoutes.js';
 
 
 import eventBus from './utils/eventEmitter.js';
@@ -23,6 +25,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+
 
 // ==========================================
 // PENGESAN METRIK GLOBAL AIGEO
@@ -42,12 +45,32 @@ setInterval(async () => {
 }, 5000);
 
 // Middleware untuk mengira jumlah request yang masuk
+
 app.use((req, res, next) => {
+    console.log(`[API REQ] ${new Date().toISOString()} - ${req.method} ${req.originalUrl}`);
     totalRequests++;
     next();
 });
 
-app.use(cors());
+const allowedOrigins = [
+    process.env.FRONTEND_URL,
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'http://localhost:4173',
+].filter(Boolean);
+
+app.use(cors({
+    origin(origin, callback) {
+        if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else {
+            callback(null, false);
+        }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+}));
 app.use(express.json());
 app.use(requestLogger);
 
@@ -60,7 +83,7 @@ app.use('/api/ahli', memberRoutes);
 app.use('/api/pertandingan', pertandinganRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/ahli', userRoutes);
-
+app.use('/api/bayaran', bayaranRoutes);
 
 app.post('/api/aigeo/login', (req, res) => {
     const { password } = req.body;
@@ -140,5 +163,5 @@ app.get('/api/stream', (req, res) => {
 
 app.use(errorLogger);
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5001;
 app.listen(PORT, () => console.log(`🛸 AIGEO Core sedang berjalan di port ${PORT}`));
