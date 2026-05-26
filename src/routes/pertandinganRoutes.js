@@ -18,7 +18,7 @@ router.post('/daftar', sertaiPertandingan);
 
 // --- Laluan URUSETIA (AJK Sahaja) ---
 // Masukkan upload.single('poster') sebelum controller
-router.post('/admin/buka', requireRole(['Admin']), upload.single('poster'), bukaPertandingan);
-router.get('/admin/peserta/:id', requireRole(['Admin']), senaraiPesertaPertandingan);
+router.post('/admin/buka', requireRole(['Admin', 'Super Admin']), upload.single('poster'), bukaPertandingan);
+router.get('/admin/peserta/:id', requireRole(['Admin', 'Super Admin']), senaraiPesertaPertandingan);
 
 export default router;

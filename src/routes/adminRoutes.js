@@ -22,7 +22,7 @@ import { verifyToken, requireRole } from '../middleware/authMiddleware.js';
 const router = express.Router();
 
 // Wajib log masuk DAN mempunyai peranan 'Admin'
-router.use(verifyToken, requireRole(['Admin']));
+router.use(verifyToken, requireRole(['Admin', 'Super Admin']));
 
 // ------------------------------------------
 // PENGURUSAN PROFIL & KESELAMATAN ADMIN
