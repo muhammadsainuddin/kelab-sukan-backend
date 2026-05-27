@@ -8,108 +8,73 @@ import { messages, getLang } from '../utils/lang.js';
 // ==========================================
 // FUNGSI BANTUAN: Pengiraan Automatik
 // ==========================================
-
-// PENGIRAAN YURAN BERDASARKAN GRED SSPA TERKINI
 const kiraYuran = (gred) => {
-    // Jika tiada gred dinyatakan, kita letak default ke RM15 (selain itu)
     if (!gred) return 15.00;
-    
     const match = gred.match(/\d+/);
     if (match) {
         const num = parseInt(match[0], 10);
         if (num >= 1 && num <= 8) return 5.00;
         if (num >= 9 && num <= 14) return 10.00;
     }
-    
-    // Selain itu (Contoh: Gred 15 ke atas, JUSA, VU, VK, dll)
     return 15.00;
 };
 
-// PENENTUAN KAEDAH POTONGAN LALAI
 const tentukanPotongan = (gred, pilihanPengguna) => {
     if (!gred) return pilihanPengguna || 'Tunai / Transfer';
     const gredUpper = gred.toUpperCase();
-    
-    // Wajib Potongan Gaji: Kumpulan JUSA / Gred 'G'
     if (gredUpper.includes('JUSA') || gredUpper.includes('VU') || gredUpper.includes('VK') || gredUpper.startsWith('G')) {
         return 'Potongan Gaji / Jabatan';
     }
-    
     return pilihanPengguna || 'Tunai / Transfer';
 };
 
 // ==========================================
-// 1. Pendaftaran Akaun (Register)
-// ==========================================
-// Pendaftaran Akaun (Register) - Kemas Kini Kategori Ahli
+// 1. Pendaftaran Akaun Ringkas (Register)
 // ==========================================
 export const register = async (req, res) => {
-    const { 
-        no_kp, email, password, no_tel, negeri_bertugas, 
-        nama_waris, hubungan_waris, no_tel_waris 
-    } = req.body;
+    const { no_kp, email, password, no_tel } = req.body;
 
     try {
-        // 1. Semak No IC dengan master_penjawat (Induk)
-        const [staf] = await db.query('SELECT * FROM master_penjawat WHERE no_kp = ?', [no_kp]);
+        // 1. SEMAKAN INDUK: Adakah No IC wujud dalam senarai_staff?
+        const [staf] = await db.query('SELECT * FROM senarai_staff WHERE no_kp = ?', [no_kp]);
         if (staf.length === 0) {
-            return res.status(403).json({ message: "Maaf, No. IC ini tiada dalam rekod kakitangan Induk. Sila hubungi Urusetia." });
+            return res.status(403).json({ message: "Maaf, No. Kad Pengenalan ini tiada dalam rekod kakitangan Induk. Sila hubungi HR/Urusetia." });
         }
 
-        // 2. Semak jika akaun login user sudah berdaftar
-        const [existingUser] = await db.query('SELECT * FROM users WHERE email = ? OR no_kp = ?', [email, no_kp]);
+        // 2. Semak jika akaun (no_kp) sudah wujud dalam jadual users
+        const [existingUser] = await db.query('SELECT id FROM users WHERE no_kp = ?', [no_kp]);
         if (existingUser.length > 0) {
-            return res.status(400).json({ message: "Akaun untuk No. IC atau E-mel ini telah wujud dalam sistem." });
+            return res.status(400).json({ message: "Akaun untuk No. Kad Pengenalan ini telah wujud dalam sistem." });
+        }
+
+        // Semakan Keselamatan Tambahan: Pastikan emel belum digunakan oleh staf lain
+        const [existingEmail] = await db.query('SELECT id FROM senarai_staff WHERE emel_kelab = ? AND no_kp != ?', [email, no_kp]);
+        if (existingEmail.length > 0) {
+            return res.status(400).json({ message: "E-mel ini telah digunakan oleh rekod kakitangan lain." });
         }
 
         const dataStaf = staf[0];
-        const yuranBulanan = kiraYuran(dataStaf.gred_sspa);
-
+        
         // 3. Hash Kata Laluan
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
 
-        // 4. Daftar akaun login sebagai AKTIF terus
-        const queryUser = `INSERT INTO users (no_kp, email, password, role, status_akaun) VALUES (?, ?, ?, 'Ahli', 'Aktif')`;
-        await db.query(queryUser, [no_kp, email, hashedPassword]);
+        // 4. Daftar akaun (Jadual `users` KINI TIDAK LAGI MENYIMPAN EMEL)
+        const queryUser = `INSERT INTO users (no_kp, password, role, status_akaun) VALUES (?, ?, 'Ahli', 'Aktif')`;
+        await db.query(queryUser, [no_kp, hashedPassword]);
 
-        // 5. SEMAK REKOD KEAHLIAN (Membezakan Ahli Sedia Ada VS Ahli Baharu)
-        const [existingKeahlian] = await db.query('SELECT status_ahli FROM keahlian_kelab WHERE no_kp = ?', [no_kp]);
-
-        if (existingKeahlian.length > 0) {
-            console.log(`[REGISTER] Ahli Sedia Ada dikesan (IC: ${no_kp}). Menetapkan Potongan Biro Angkasa.`);
-            
-            // AHLI SEDIA ADA: Kemas kini butiran, kekalkan kaedah potongan Biro Angkasa (Potongan Gaji)
-            const queryUpdateKeahlian = `
-                UPDATE keahlian_kelab 
-                SET email = ?, no_tel = ?, negeri_bertugas = ?, 
-                    nama_waris = ?, hubungan_waris = ?, no_tel_waris = ?, 
-                    pilihan_potongan = 'Potongan Gaji / Jabatan', -- Tetapkan Biro Angkasa
-                    yuran_bulanan = ?
-                WHERE no_kp = ?
-            `;
-            await db.query(queryUpdateKeahlian, [
-                email, no_tel, negeri_bertugas, nama_waris, hubungan_waris, no_tel_waris, 
-                yuranBulanan, no_kp
-            ]);
-        } else {
-            console.log(`[REGISTER] Ahli Baharu dikesan (IC: ${no_kp}). Menetapkan Mandatori FPX.`);
-            
-            // AHLI BAHARU: Masukkan rekod baharu dengan tetapan mandatori Potongan FPX (ToyyibPay)
-            const queryInsertKeahlian = `
-                INSERT INTO keahlian_kelab 
-                (no_kp, nama_full, nama_majikan, negeri_bertugas, email, no_tel, nama_waris, hubungan_waris, no_tel_waris, yuran_bulanan, pilihan_potongan, status_ahli) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Potongan FPX (ToyyibPay)', 'TIDAK BERBAYAR')
-            `;
-            await db.query(queryInsertKeahlian, [
-                no_kp, dataStaf.nama_pegawai, dataStaf.penempatan, negeri_bertugas, 
-                email, no_tel, nama_waris, hubungan_waris, no_tel_waris, 
-                yuranBulanan
-            ]);
-        }
+        // 5. KEMAS KINI REKOD INDUK (senarai_staff) dengan emel & no telefon.
+        const statusAkhir = dataStaf.status_ahli === 'A - Aktif' ? 'A - Aktif' : 'TIDAK BERBAYAR';
+        
+        const queryUpdateStaf = `
+            UPDATE senarai_staff 
+            SET emel_kelab = ?, no_tel = ?, status_ahli = ?
+            WHERE no_kp = ?
+        `;
+        await db.query(queryUpdateStaf, [email, no_tel, statusAkhir, no_kp]);
 
         res.status(201).json({ 
-            message: "Pendaftaran akaun berjaya! Sila log masuk untuk menyemak profil anda." 
+            message: "Pendaftaran berjaya! Sila log masuk dan kemas kini profil anda di dalam sistem." 
         });
 
     } catch (error) {
@@ -125,11 +90,14 @@ export const login = async (req, res) => {
     const { email, password } = req.body;
 
     try {
+        // Gabungkan jadual `users` dan `senarai_staff` berpandukan `no_kp`
+        // Carian dibuat berdasarkan `emel_kelab` di dalam jadual senarai_staff
         const query = `
-            SELECT u.*, m.nama_pegawai, m.penempatan 
+            SELECT u.id, u.no_kp, u.password, u.role, u.status_akaun, 
+                   s.nama_pegawai, s.penempatan, s.emel_kelab 
             FROM users u
-            JOIN master_penjawat m ON u.no_kp = m.no_kp
-            WHERE u.email = ?
+            JOIN senarai_staff s ON u.no_kp = s.no_kp
+            WHERE s.emel_kelab = ?
         `;
         const [users] = await db.query(query, [email]);
         const user = users[0];
@@ -142,6 +110,7 @@ export const login = async (req, res) => {
             return res.status(403).json({ message: "Akaun anda telah disekat/ditolak oleh pentadbir." });
         }
 
+        // Jana Token JWT
         const token = jwt.sign(
             { id: user.id, role: user.role, no_kp: user.no_kp },
             process.env.JWT_SECRET,
@@ -167,11 +136,17 @@ export const login = async (req, res) => {
 export const forgotPassword = async (req, res) => {
     const lang = getLang(req);
     const msg = messages[lang];
-
     const { email } = req.body;
 
     try {
-        const [users] = await db.query('SELECT * FROM users WHERE email = ?', [email]);
+        // Cari pengguna berdasarkan `emel_kelab` dari senarai_staff
+        const query = `
+            SELECT u.id, s.emel_kelab 
+            FROM users u
+            JOIN senarai_staff s ON u.no_kp = s.no_kp
+            WHERE s.emel_kelab = ?
+        `;
+        const [users] = await db.query(query, [email]);
         const user = users[0];
 
         if (!user) {
@@ -182,9 +157,10 @@ export const forgotPassword = async (req, res) => {
         const hashedResetToken = crypto.createHash('sha256').update(resetToken).digest('hex');
         const expiryTime = new Date(Date.now() + 10 * 60 * 1000); 
 
+        // Update token pada jadual `users` menggunakan u.id
         await db.query(
-            'UPDATE users SET reset_token = ?, reset_token_expiry = ? WHERE email = ?',
-            [hashedResetToken, expiryTime, email]
+            'UPDATE users SET reset_token = ?, reset_token_expiry = ? WHERE id = ?',
+            [hashedResetToken, expiryTime, user.id]
         );
 
         const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
@@ -214,7 +190,7 @@ export const forgotPassword = async (req, res) => {
         `;
 
         await sendEmail({
-            email: user.email,
+            email: user.emel_kelab,
             subject: msg.emailSubject,
             message: emailTemplate
         });
@@ -222,7 +198,12 @@ export const forgotPassword = async (req, res) => {
         res.status(200).json({ message: msg.resetEmailSent });
     } catch (error) {
         console.error("Forgot Password Error:", error);
-        await db.query('UPDATE users SET reset_token = NULL, reset_token_expiry = NULL WHERE email = ?', [email]);
+        
+        // Carian ID sebelum clear token jika berlaku ralat hantar e-mel
+        const [failedUsers] = await db.query('SELECT u.id FROM users u JOIN senarai_staff s ON u.no_kp = s.no_kp WHERE s.emel_kelab = ?', [email]);
+        if(failedUsers.length > 0) {
+            await db.query('UPDATE users SET reset_token = NULL, reset_token_expiry = NULL WHERE id = ?', [failedUsers[0].id]);
+        }
         res.status(500).json({ message: msg.emailFailed });
     }
 };
@@ -240,8 +221,9 @@ export const resetPassword = async (req, res) => {
     try {
         const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
 
+        // Carian reset_token pada jadual `users` sahaja
         const [users] = await db.query(
-            'SELECT * FROM users WHERE reset_token = ? AND reset_token_expiry > NOW()',
+            'SELECT id FROM users WHERE reset_token = ? AND reset_token_expiry > NOW()',
             [hashedToken]
         );
         const user = users[0];

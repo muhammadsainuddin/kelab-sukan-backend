@@ -507,42 +507,47 @@ export const getAllResitBayaran = async (req, res) => {
     }
 };
 
+
 // ==========================================
-// DIREKTORI BERSEPADU (MASTER + KEAHLIAN)
+// DIREKTORI BERSEPADU (BACA SEMUA DATA senarai_staff)
 // ==========================================
 export const getDirektoriBersepadu = async (req, res) => {
     try {
-        // Gabungkan Master Penjawat dengan Keahlian Kelab menggunakan LEFT JOIN
+        // Guna SELECT * untuk tarik semua lajur
+        // Kita letakkan AS nama_penuh & AS email supaya selaras dengan kod Frontend sedia ada
         const query = `
             SELECT 
-                m.no_kp, 
-                m.nama_pegawai as nama_penuh, 
-                m.gred_sspa, 
-                m.penempatan, 
-                m.kategori_staf,
-                k.no_ahli, 
-                k.status_ahli, 
-                k.pilihan_potongan, 
-                k.yuran_bulanan,
-                k.no_tel,
-                k.email
-            FROM master_penjawat m
-            LEFT JOIN keahlian_kelab k ON m.no_kp = k.no_kp
-            ORDER BY m.nama_pegawai ASC
+                *,
+                nama_pegawai AS nama_penuh, 
+                emel_kelab AS email
+            FROM senarai_staff
+            ORDER BY nama_pegawai ASC
         `;
         const [rows] = await db.query(query);
         
-        // Bersihkan data sebelum hantar ke Frontend
-        const formattedData = rows.map(row => ({
-            ...row,
-            // Jika status_ahli null, bermaksud dia belum mendaftar kelab langsung
-            status_sebenar: row.status_ahli || 'BELUM MENDAFTAR',
-            potongan_sebenar: row.pilihan_potongan || 'TIADA'
-        }));
+        // Membersihkan dan menyelaraskan data
+        const formattedData = rows.map(row => {
+            let potongan = row.pilihan_potongan;
+            if (!potongan) {
+                if (row.remark && row.remark.toLowerCase().includes('fpx')) {
+                    potongan = 'FPX (ToyyibPay)';
+                } else if (row.remark && row.remark.toLowerCase().includes('biro angkasa')) {
+                    potongan = 'Biro Angkasa';
+                } else {
+                    potongan = 'TIADA';
+                }
+            }
+
+            return {
+                ...row,
+                status_sebenar: row.status_ahli || 'BELUM MENDAFTAR',
+                potongan_sebenar: potongan
+            };
+        });
 
         res.status(200).json({ success: true, data: formattedData });
     } catch (error) {
-        console.error("🔴 [ADMIN API ERROR] Gagal tarik direktori bersepadu:", error.message);
-        res.status(500).json({ success: false, message: "Gagal menarik senarai direktori." });
+        console.error("🔴 [ADMIN API ERROR] Gagal tarik direktori senarai_staff:", error.message);
+        res.status(500).json({ success: false, message: "Gagal menarik senarai direktori kakitangan." });
     }
 };
