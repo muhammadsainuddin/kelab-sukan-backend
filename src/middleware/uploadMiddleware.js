@@ -14,6 +14,8 @@ const uploadDir = path.join(__dirname, '../public/uploads');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 if (!fs.existsSync(path.join(uploadDir, 'images'))) fs.mkdirSync(path.join(uploadDir, 'images'));
 if (!fs.existsSync(path.join(uploadDir, 'audio'))) fs.mkdirSync(path.join(uploadDir, 'audio'));
+// TAMBAHAN BARU: Folder untuk dokumen permohonan bantuan (PDF)
+if (!fs.existsSync(path.join(uploadDir, 'bantuan'))) fs.mkdirSync(path.join(uploadDir, 'bantuan')); 
 
 
 // Konfigurasi storan (Di mana dan apa nama fail disimpan)
@@ -24,25 +26,36 @@ const storage = multer.diskStorage({
             cb(null, path.join(uploadDir, 'images'));
         } else if (file.mimetype.startsWith('audio/') || file.mimetype.startsWith('video/')) {
             cb(null, path.join(uploadDir, 'audio'));
+        } else if (file.mimetype === 'application/pdf') {
+            // TAMBAHAN BARU: Hala ke folder bantuan jika format PDF
+            cb(null, path.join(uploadDir, 'bantuan')); 
         } else {
             cb(null, uploadDir); 
         }
     },
     filename: (req, file, cb) => {
-        // TUKAR DI SINI: Guna mimetype, bukan fieldname
-        const prefix = file.mimetype.startsWith('image/') ? 'IMG' : 'AUD';
+        // Asingkan prefix nama fail
+        let prefix = 'FILE';
+        if (file.mimetype.startsWith('image/')) prefix = 'IMG';
+        else if (file.mimetype.startsWith('audio/') || file.mimetype.startsWith('video/')) prefix = 'AUD';
+        else if (file.mimetype === 'application/pdf') prefix = 'DOC'; // TAMBAHAN BARU
         
         const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
         cb(null, `${prefix}-${uniqueSuffix}${path.extname(file.originalname)}`);
     }
 });
 
-// Penapis fail (Hanya terima gambar dan audio sahaja)
+// Penapis fail (Terima gambar, audio, video dan PDF sahaja)
 const fileFilter = (req, file, cb) => {
-    if (file.mimetype.startsWith('image/') || file.mimetype.startsWith('audio/') || file.mimetype.startsWith('video/')) {
+    if (
+        file.mimetype.startsWith('image/') || 
+        file.mimetype.startsWith('audio/') || 
+        file.mimetype.startsWith('video/') ||
+        file.mimetype === 'application/pdf' // TAMBAHAN BARU: Benarkan PDF
+    ) {
         cb(null, true);
     } else {
-        cb(new Error('Format fail tidak disokong. Sila muat naik gambar atau audio sahaja.'), false);
+        cb(new Error('Format fail tidak disokong. Sila muat naik gambar, audio/video atau dokumen PDF sahaja.'), false);
     }
 };
 
@@ -50,5 +63,5 @@ const fileFilter = (req, file, cb) => {
 export const upload = multer({ 
     storage: storage,
     fileFilter: fileFilter,
-    limits: { fileSize: 20 * 1024 * 1024 } // Had saiz fail: 20MB
+    limits: { fileSize: 20 * 1024 * 1024 } // Had saiz fail: 20MB kekal sama
 });

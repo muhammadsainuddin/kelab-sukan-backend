@@ -506,3 +506,43 @@ export const getAllResitBayaran = async (req, res) => {
         res.status(500).json({ success: false, message: "Gagal menarik senarai resit." });
     }
 };
+
+// ==========================================
+// DIREKTORI BERSEPADU (MASTER + KEAHLIAN)
+// ==========================================
+export const getDirektoriBersepadu = async (req, res) => {
+    try {
+        // Gabungkan Master Penjawat dengan Keahlian Kelab menggunakan LEFT JOIN
+        const query = `
+            SELECT 
+                m.no_kp, 
+                m.nama_pegawai as nama_penuh, 
+                m.gred_sspa, 
+                m.penempatan, 
+                m.kategori_staf,
+                k.no_ahli, 
+                k.status_ahli, 
+                k.pilihan_potongan, 
+                k.yuran_bulanan,
+                k.no_tel,
+                k.email
+            FROM master_penjawat m
+            LEFT JOIN keahlian_kelab k ON m.no_kp = k.no_kp
+            ORDER BY m.nama_pegawai ASC
+        `;
+        const [rows] = await db.query(query);
+        
+        // Bersihkan data sebelum hantar ke Frontend
+        const formattedData = rows.map(row => ({
+            ...row,
+            // Jika status_ahli null, bermaksud dia belum mendaftar kelab langsung
+            status_sebenar: row.status_ahli || 'BELUM MENDAFTAR',
+            potongan_sebenar: row.pilihan_potongan || 'TIADA'
+        }));
+
+        res.status(200).json({ success: true, data: formattedData });
+    } catch (error) {
+        console.error("🔴 [ADMIN API ERROR] Gagal tarik direktori bersepadu:", error.message);
+        res.status(500).json({ success: false, message: "Gagal menarik senarai direktori." });
+    }
+};

@@ -8,7 +8,7 @@ import {
     getSenaraiPTJ
 
 } from '../controllers/userController.js';
-import { mohonBantuan, sejarahBantuan } from '../controllers/kebajikanController.js';
+
 
 import { verifyToken } from '../middleware/authMiddleware.js';
 import { upload } from '../middleware/uploadMiddleware.js';
@@ -38,8 +38,5 @@ router.put('/tukar-password', changePassword);
 // getSenaraiPTJ: Menarik senarai PTJ
 router.get('/senarai-ptj', getSenaraiPTJ);
 
-// 3. LALUAN KEBAJIKAN (MODUL BANTUAN)
-router.post('/bantuan', upload.single('dokumen'), mohonBantuan);
-router.get('/bantuan/sejarah', sejarahBantuan);
 
 export default router;

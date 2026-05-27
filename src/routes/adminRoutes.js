@@ -15,7 +15,8 @@ import {
     kemaskiniProfilSaya,
     tukarKatalaluan,  // <--- FUNGSI BARU
     getStatistikTunggakan,
-    getAllResitBayaran
+    getAllResitBayaran,
+    getDirektoriBersepadu
 } from '../controllers/adminController.js';
 import { verifyToken, requireRole } from '../middleware/authMiddleware.js';
 
@@ -62,5 +63,7 @@ router.get('/berhenti', senaraiBerhentiAhli);
 router.put('/berhenti/:id/lulus', kemaskiniBerhentiAhli);
 
 router.get('/statistik-tunggakan', getStatistikTunggakan);
+
+router.get('/direktori-bersepadu', getDirektoriBersepadu);
 
 export default router;

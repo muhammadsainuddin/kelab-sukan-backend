@@ -14,6 +14,7 @@ import pertandinganRoutes from './routes/pertandinganRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 import bayaranRoutes from './routes/bayaranRoutes.js';
+import bantuanRoutes from './routes/bantuanRoutes.js';
 
 
 import eventBus from './utils/eventEmitter.js';
@@ -84,7 +85,7 @@ app.use('/api/pertandingan', pertandinganRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/ahli', userRoutes);
 app.use('/api/bayaran', bayaranRoutes);
-
+app.use('/api/bantuan', bantuanRoutes);
 app.post('/api/aigeo/login', (req, res) => {
     const { password } = req.body;
     if (password === process.env.AIGEO_PASS) {
